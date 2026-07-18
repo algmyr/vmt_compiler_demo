@@ -1,0 +1,126 @@
+target-version = "py312"
+extend-exclude = [".cache"]
+line-length = 88
+indent-width = 4
+exclude = [".jj"]
+
+[format]
+line-ending = "lf"
+preview = true
+quote-style = "single"
+
+[lint]
+ignore = [
+    # flake8-annotations (ANN)
+    "ANN002",  # missing-type-args                  - Missing type annotation for *{name} 
+    "ANN003",  # missing-type-kwargs                - Missing type annotation for **{name} 
+    "ANN204",  # missing-return-type-special-method - Missing return type annotation for special method {name} 
+    "ANN206",  # missing-return-type-class-method   - Missing return type annotation for classmethod {name} 
+    "ANN401",  # any-type                           - Dynamically typed expressions (typing.Any) are disallowed in {name} 
+
+    # flake8-bugbear (B)
+    "B904",  # raise-without-from-inside-except - Within an except clause, raise exceptions with raise ... from err or raise ... from None to distinguish them from errors in exception handling 
+    "B905",  # zip-without-explicit-strict      - zip() without an explicit strict= parameter 
+
+    # flake8-comprehensions (C4)
+    "C401",  # unnecessary-generator-set   - Unnecessary generator (rewrite as a set comprehension) 
+    "C408",  # unnecessary-collection-call - Unnecessary {obj_type} call (rewrite as a literal) 
+
+    # pydocstyle (D)
+    "D100",  # undocumented-public-module               - Missing docstring in public module 
+    "D104",  # undocumented-public-package              - Missing docstring in public package 
+    "D105",  # undocumented-magic-method                - Missing docstring in magic method 
+    "D107",  # undocumented-public-init                 - Missing docstring in __init__ 
+    "D203",  # one-blank-line-before-class              - 1 blank line required before class docstring 
+    "D213",  # multi-line-summary-second-line           - Multi-line docstring summary should start at the second line 
+    "D214",  # section-not-over-indented                - Section is over-indented ("{name}") 
+    "D215",  # section-underline-not-over-indented      - Section underline is over-indented ("{name}") 
+    "D301",  # escape-sequence-in-docstring             - Use r""" if any backslashes in a docstring 
+    "D400",  # ends-in-period                           - First line should end with a period 
+    "D401",  # non-imperative-mood                      - First line of docstring should be in imperative mood: "{first_line}" 
+    "D402",  # no-signature                             - First line should not be the function's signature 
+    "D404",  # docstring-starts-with-this               - First word of the docstring should not be "This" 
+    "D405",  # capitalize-section-name                  - Section name should be properly capitalized ("{name}") 
+    "D406",  # new-line-after-section-name              - Section name should end with a newline ("{name}") 
+    "D407",  # dashed-underline-after-section           - Missing dashed underline after section ("{name}") 
+    "D408",  # section-underline-after-name             - Section underline should be in the line following the section's name ("{name}") 
+    "D409",  # section-underline-matches-section-length - Section underline should match the length of its name ("{name}") 
+    "D410",  # no-blank-line-after-section              - Missing blank line after section ("{name}") 
+    "D411",  # no-blank-line-before-section             - Missing blank line before section ("{name}") 
+    "D412",  # blank-lines-between-header-and-content   - No blank lines allowed between a section header and its content ("{name}") 
+    "D413",  # blank-line-after-last-section            - Missing blank line after last section ("{name}") 
+    "D414",  # empty-docstring-section                  - Section has no content ("{name}") 
+    "D416",  # section-name-ends-in-colon               - Section name should end with a colon ("{name}") 
+    "D417",  # undocumented-param                       - Missing argument description in the docstring for {definition}: {name} 
+
+    # pycodestyle (E, W)
+    "E111",  # indentation-with-invalid-multiple - Indentation is not a multiple of
+    "E731",  # lambda-assignment - Do not assign a lambda expression, use a def 
+    "E114",  # indentation-with-invalid-multiple-comment - Indentation is not a multiple of {indent_size} (comment)
+
+    # flake8-return (RET)
+    "RET504",  # unnecessary-assign - Unnecessary assignment to {name} before return statement 
+
+    # Ruff-specific rules (RUF)
+    "RUF005",  # collection-literal-concatenation                  - Consider {expression} instead of concatenation 
+    "RUF012",  # mutable-class-default                             - Mutable class attributes should be annotated with typing.ClassVar 
+    "RUF015",  # unnecessary-iterable-allocation-for-first-element - Prefer next({iterable}) over single element slice 
+
+    # flake8-bandit (S)
+    "S311",  # suspicious-non-cryptographic-random-usage - Standard pseudo-random generators are not suitable for cryptographic purposes 
+
+    # flake8-simplify (SIM)
+    "SIM102",  # collapsible-if                  - Use a single if statement instead of nested if statements 
+    "SIM108",  # if-else-block-instead-of-if-exp - Use ternary operator {contents} instead of if-else-block 
+
+    # Formatter issues.
+    "ISC001",  # single-line-implicit-string-concatenation - Implicitly concatenated string literals on one line
+
+    # Personal
+    "D204",  # one-blank-line-after-class - 1 blank line required after class docstring 
+    "E741",  # ambiguous-variable-name - Ambiguous variable name: {name}
+    "S101",  # assert - Use of assert detected 
+    "S404",  # suspicious-subprocess-import - `subprocess` module is possibly insecure
+    "S603",  # subprocess-without-shell-equals-true - subprocess call: check for execution of untrusted input 
+    "S607",  # start-process-with-partial-path - Starting a process with a partial executable path 
+    "UP007", # non-pep604-annotation - Use X | Y for type annotations 
+]
+select = [
+    "ANN", # flake8-annotations (ANN)
+    "B",   # flake8-bugbear (B) C
+    "C4",  # flake8-comprehensions (C4)
+    "D",   # pydocstyle (D)
+    "DTZ", # flake8-datetimez (DTZ)
+    "E",   # pycodestyle (E, W)
+    "F",   # Pyflakes (F)
+    "I",   # isort (I)
+    "ISC", # flake8-implicit-str-concat (ISC)
+    "INT", # flake8-gettext (INT)
+    "N",   # pep8-naming (N)
+    "PGH", # pygrep-hooks (PGH)
+    "PIE", # flake8-pie (PIE)
+    "PYI", # flake8-pyi (PYI)
+    "Q",   # flake8-quotes (Q)
+    "RET", # flake8-return (RET)
+    "RSE", # flake8-raise (RSE)
+    "RUF", # Ruff-specific rules (RUF)
+    "S",   # flake8-bandit (S)
+    "SIM", # flake8-simplify (SIM)
+    # "T20", # flake8-print (T20)
+    "TID", # flake8-tidy-imports (TID)
+    "UP",  # pyupgrade (UP)
+    "W",   # pycodestyle (E, W)
+]
+
+[lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
+multiline-quotes = "double"
+
+[lint.isort]
+order-by-type = true
+case-sensitive = true
+combine-as-imports = true
+force-sort-within-sections = true
+force-single-line = true
+single-line-exclusions = ['typing', 'collections.abc']
