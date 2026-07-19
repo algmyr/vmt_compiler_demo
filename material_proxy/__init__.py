@@ -25,6 +25,7 @@ __all__ = [
     'dead_code_elimination',
     'interpret_vmt',
     'temp_reuse',
+    'vmtify',
 ]
 
 from material_proxy.expr import Abs
@@ -53,3 +54,4 @@ from material_proxy.optimize import dead_code_elimination
 from material_proxy.optimize import temp_reuse
 from material_proxy.program import Program
 from material_proxy.program import compile_to_vmt
+from material_proxy.vmtify import vmtify
