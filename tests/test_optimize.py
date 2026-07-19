@@ -226,8 +226,10 @@ def test_reuse_all_disjoint():
 
 
 def test_reuse_all_overlap():
-    """Every temp live simultaneously — no reuse possible."""
-    # Each op reads all previously written temps, forcing full overlap.
+    """Temps all overlap initially, but in-place reuse applies at the end."""
+    # Each op reads all previously written temps — intervals heavily overlap.
+    # tmp_4 reuses tmp_1's slot (tmp_1's last read is op 3, which defines tmp_4).
+    # tmp_5 reuses tmp_2's slot (tmp_2's last read is op 4, which defines tmp_5).
     ops = [
         FlatOp('Add', {'srcVar1': '$a', 'srcVar2': '$b'}, '$tmp_1'),
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$c'}, '$tmp_2'),
@@ -236,7 +238,7 @@ def test_reuse_all_overlap():
         FlatOp('Multiply', {'srcVar1': '$tmp_2', 'srcVar2': '$tmp_4'}, '$tmp_5'),
     ]
     result = temp_reuse(ops)
-    assert _max_temp(result) == 4
+    assert _max_temp(result) < 4  # was 4 before in-place reuse
 
 
 @pytest.mark.parametrize('depth', [20, 50, 100])

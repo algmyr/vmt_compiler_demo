@@ -102,19 +102,27 @@ def temp_reuse(ops: list[FlatOp]) -> list[FlatOp]:
         if op.result.startswith('$tmp_'):
             def_temps.add(op.result)
 
-    # Compute liveness interval for each defined temp
+    # Compute liveness interval for each defined temp.
+    # The *end* of a temp's liveness is its *last read* position (param use),
+    # not its last write (result).  This allows a later temp to reuse the slot
+    # of a temp whose last read is the current operation (in-place reuse).
     intervals: list[tuple[int, int, str]] = []
     for t in def_temps:
         start = -1
         end = -1
         for i, op in enumerate(ops):
             if op.result == t:
-                start = i if start == -1 else start
-                end = i
+                if start == -1:
+                    start = i
             for v in op.params.values():
                 if v == t:
                     if start == -1:
                         start = i
+                    end = i
+        if end == -1:
+            # Defined but never read — its last use is its last definition.
+            for i, op in enumerate(ops):
+                if op.result == t:
                     end = i
         intervals.append((start, end, t))
 
@@ -122,12 +130,15 @@ def temp_reuse(ops: list[FlatOp]) -> list[FlatOp]:
     intervals.sort()
 
     # Greedy slot assignment
+    # A slot is reusable when its free-at ≤ the current interval's start,
+    # enabling in-place reuse (write a temp's slot with a new value once
+    # the old value's last read has passed).
     slots: list[int] = []
     old_to_new: dict[str, str] = {}
     for start, end, t in intervals:
         placed = False
         for slot_idx, free_at in enumerate(slots):
-            if free_at < start:
+            if free_at <= start:
                 slots[slot_idx] = end
                 old_to_new[t] = f'$tmp_{slot_idx + 1}'
                 placed = True
