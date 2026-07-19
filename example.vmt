@@ -1,0 +1,89 @@
+"UnlitGeneric" {
+    "$tmp_1" 0.0
+    "$tmp_2" 0.0
+    "$tmp_3" 0.0
+
+    "$-1" -1.0
+    "$0" 0.0
+    "$0.09" 0.09
+    "$0.18" 0.18
+    "$0.5" 0.5
+    "$0.9" 0.9
+    "$1" 1.0
+    "$3" 3.0
+    "$200" 200.0
+    
+    "$time" 0.0
+    "$pos" "[0.0 0.0 0.0]"
+    "$speed" 0.0
+    
+    "$prev_outlier_z" 0.0
+    "$prev_outlier_tick" 0.0
+    "$out_max_z" 0.0
+    
+    "$subtick" 0.0
+    "$tick" 0.0
+    "$z" 0.0
+    
+    "$delta" 0.0
+    "$vz" 0.0
+    "$delta_peak" 0.0
+    "$out_max_z" 0.0
+    
+    Proxies {
+        CurrentTime { resultVar "$time" }
+        PlayerPosition { scale "1" resultVar "$pos" }
+        PlayerSpeed { scale "1" resultVar "$speed" }
+        Clamp { srcVar1 "$0" min "$pos[2]" max "$pos[2]" resultVar "$z" }
+        
+        // subtick = curtime() * 200/3
+        Divide { srcVar1 "$200" srcVar2 "$3" resultVar "$tmp_1" }
+        Multiply { srcVar1 "$tmp_1" srcVar2 "$time" resultVar "$subtick" }
+        
+        // tick = floor(subtick)
+        Int { srcVar1 "$subtick" resultVar "$tick" }
+        
+        // if z != prev_outlier_z >>> abs(prev_outlier_z - z) <= abs(prev_outlier_z - z) * -1
+        Subtract { srcVar1 "$prev_outlier_z" srcVar2 "$z" resultVar "$tmp_1" }
+        Abs { srcVar1 "$tmp_1" resultVar "$tmp_1" }
+        Multiply { srcVar1 "$tmp_1" srcVar2 "$-1" resultVar "$tmp_2" }
+        LessOrEqual { srcVar1 "$tmp_1" srcVar2 "$tmp_2" lessEqualVar "$0" greaterVar "$1" resultVar "$tmp_3"}
+        
+        // && subtick - tick >= 0.9 >>> tick - subtick <= 1 - 0.9
+        Subtract { srcVar1 "$tick" srcVar2 "$subtick" resultVar "$tmp_1" }
+        Subtract { srcVar1 "$1" srcVar2 "$0.9" resultVar "$tmp_2" }
+        LessOrEqual { srcVar1 "$tmp_1" srcVar2 "$tmp_2" lessEqualVar "$1" greaterVar "$0" resultVar "$tmp_3"}
+            
+            // delta = tick - prev_outlier_tick
+            Subtract { srcVar1 "$tick" srcVar2 "$prev_outlier_tick" resultVar "$tmp_1" }
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$delta" greaterVar "$tmp_1" resultVar "$delta"}
+            
+            // vz = (z - prev_outlier_z)/delta - 0.09 * delta
+            Subtract { srcVar1 "$z" srcVar2 "$prev_outlier_z" resultVar "$tmp_1" }
+            Divide { srcVar1 "$tmp_1" srcVar2 "$delta" resultVar "$tmp_1" }
+            Multiply { srcVar1 "$0.09" srcVar2 "$delta" resultVar "$tmp_2" }
+            Subtract { srcVar1 "$tmp_1" srcVar2 "$tmp_2" resultVar "$tmp_1" }
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$vz" greaterVar "$tmp_1" resultVar "$vz"}
+            
+            // delta_peak = round(vz/0.18)
+            Divide { srcVar1 "$vz" srcVar2 "$0.18" resultVar "$tmp_1" }
+            Frac { srcVar1 "$tmp_1" resultVar "$tmp_2" }
+            LessOrEqual { srcVar1 "$0.5" srcVar2 "$tmp_2" lessEqualVar "$1" greaterVar "$0" resultVar "$tmp_2"}
+            Add { srcVar1 "$tmp_1" srcVar2 "$tmp_2" resultVar "$tmp_1" }
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$delta_peak" greaterVar "$tmp_1" resultVar "$delta_peak"}
+            
+            // out_max_z = prev_outlier_z + vz * delta_peak - 0.09 * delta_peak * delta_peak
+            Multiply { srcVar1 "$vz" srcVar2 "$delta_peak" resultVar "$tmp_1" }
+            Multiply { srcVar1 "$0.09" srcVar2 "$delta_peak" resultVar "$tmp_2" }
+            Multiply { srcVar1 "$tmp_2" srcVar2 "$delta_peak" resultVar "$tmp_2" }
+            Add { srcVar1 "$prev_outlier_z" srcVar2 "$tmp_1" resultVar "$tmp_1" }
+            Subtract { srcVar1 "$tmp_1" srcVar2 "$tmp_2" resultVar "$tmp_1" }
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$out_max_z" greaterVar "$tmp_1" resultVar "$out_max_z"}
+            
+            // prev_outlier_z = z
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$prev_outlier_z" greaterVar "$z" resultVar "$prev_outlier_z"}
+            
+            // prev_outlier_tick = tick
+            LessOrEqual { srcVar1 "$tmp_3" srcVar2 "0" lessEqualVar "$prev_outlier_tick" greaterVar "$tick" resultVar "$prev_outlier_tick"}
+    }
+}
