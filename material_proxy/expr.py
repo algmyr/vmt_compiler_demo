@@ -97,7 +97,7 @@ class Const(Expr):
         yield repr(self.value)
 
     def _hash_children(self) -> tuple:
-        return (round(self.value, 6),)
+        return (self.value,)
 
 
 class Var(Expr):
