@@ -16,6 +16,7 @@ from material_proxy import Mul
 from material_proxy import Sub
 from material_proxy import Var
 from material_proxy.emit import emit_vmt
+from material_proxy.flatten import FlatOp
 from material_proxy.flatten import Flattener
 from material_proxy.interpret import interpret_vmt
 from material_proxy.optimize import constant_fold
@@ -151,13 +152,8 @@ def test_hypothesis_full_pipeline(expr: Expr) -> None:
     if not folded_ops:
         return  # fully constant — no optimisation to test
 
-    live: set[str] = set(folded_consts.values())
-    for op in folded_ops:
-        if op.result.startswith('$') and not op.result.startswith('$tmp_'):
-            live.add(op.result)
-    live.add(folded_ops[-1].result)
-
-    dce_ops = dead_code_elimination(folded_ops, live)
+    folded_ops.append(FlatOp('Equals', {'srcVar1': folded_ops[-1].result}, '$hp_out'))
+    dce_ops = dead_code_elimination(folded_ops)
     final_ops = temp_reuse(dce_ops)
     opt_vmt = emit_vmt(final_ops, folded_consts)
     try:

@@ -133,12 +133,14 @@ def test_dce_removes_unused():
         FlatOp('Add', {'srcVar1': '$1', 'srcVar2': '$2'}, '$tmp_1'),
         FlatOp('Add', {'srcVar1': '$3', 'srcVar2': '$4'}, '$tmp_2'),
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$5'}, '$tmp_3'),
+        FlatOp('Equals', {'srcVar1': '$tmp_3'}, 'out'),
     ]
-    result = dead_code_elimination(ops, {'$tmp_3'})
-    assert len(result) == 2
+    result = dead_code_elimination(ops)
+    assert len(result) == 3
     assert result[0].proxy == 'Add'
     assert result[0].result == '$tmp_1'
     assert result[1].result == '$tmp_3'
+    assert result[2].proxy == 'Equals'
 
 
 def test_dce_keeps_all():
@@ -146,9 +148,10 @@ def test_dce_keeps_all():
     ops = [
         FlatOp('Mul', {'srcVar1': '$x', 'srcVar2': '$y'}, '$tmp_1'),
         FlatOp('Add', {'srcVar1': '$tmp_1', 'srcVar2': '$z'}, '$tmp_2'),
+        FlatOp('Equals', {'srcVar1': '$tmp_2'}, 'out'),
     ]
-    result = dead_code_elimination(ops, {'$tmp_2'})
-    assert len(result) == 2
+    result = dead_code_elimination(ops)
+    assert len(result) == 3
 
 
 def test_dce_chain_dead():
@@ -159,19 +162,21 @@ def test_dce_chain_dead():
         FlatOp('Sub', {'srcVar1': '$4', 'srcVar2': '$5'}, '$tmp_3'),
         FlatOp('Add', {'srcVar1': '$tmp_2', 'srcVar2': '$tmp_3'}, '$tmp_4'),
     ]
-    result = dead_code_elimination(ops, {'$tmp_4'})
-    # $tmp_3 used by tmp_4, so Sub kept; $tmp_1/$tmp_2 used chain; all 4 ops kept
-    assert len(result) == 4
-    result2 = dead_code_elimination(ops, {'$tmp_2'})
+    out1 = FlatOp('Equals', {'srcVar1': '$tmp_4'}, 'out')
+    result = dead_code_elimination([*ops, out1])
+    # $tmp_3 used by tmp_4 (Sub kept); $tmp_1/$tmp_2 used chain; all 4 ops + Equals kept
+    assert len(result) == 5
+    out2 = FlatOp('Equals', {'srcVar1': '$tmp_2'}, 'out')
+    result2 = dead_code_elimination([*ops, out2])
     # Only the chain leading to $tmp_2 kept; $tmp_3/$tmp_4 dead
-    assert len(result2) == 2
-    assert {op.result for op in result2} == {'$tmp_1', '$tmp_2'}
+    assert len(result2) == 3
+    assert {op.result for op in result2} == {'$tmp_1', '$tmp_2', 'out'}
 
 
 def test_dce_empty_live():
     """No live temps → all ops dead."""
     ops = [FlatOp('Add', {'srcVar1': '$1', 'srcVar2': '$2'}, '$tmp_1')]
-    result = dead_code_elimination(ops, set())
+    result = dead_code_elimination(ops)
     assert len(result) == 0
 
 
@@ -341,13 +346,10 @@ def test_reuse_pipeline_correctness_randomish():
         res = flat.result()
 
         folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
-        live = set(folded_consts.values())
-        for op in folded_ops:
-            if op.result.startswith('$') and not op.result.startswith('$tmp_'):
-                live.add(op.result)
         if folded_ops:
-            live.add(folded_ops[-1].result)
-        dce_ops = dead_code_elimination(folded_ops, live)
+            out = FlatOp('Equals', {'srcVar1': folded_ops[-1].result}, '$pipeline_out')
+            folded_ops.append(out)
+        dce_ops = dead_code_elimination(folded_ops)
         final_ops = temp_reuse(dce_ops)
         opt_vmt = emit_vmt(final_ops, folded_consts)
         got = interpret_vmt(opt_vmt, ctx)

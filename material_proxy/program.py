@@ -51,31 +51,14 @@ class Program:
         res = flattener.result()
         ops = list(res.ops)
         consts = res.consts
-        temp_to_val: dict[str, float] = {}
 
-        if optimize:
-            ops, consts, temp_to_val = constant_fold(ops, consts)
-
-        # Build a reverse lookup: folded temp → constant name
-        temp_to_name: dict[str, str] = {
-            t: consts[v] for t, v in temp_to_val.items() if v in consts
-        }
-
-        # Append an Equals per output to assign the final temp to the user name
+        # Append Equals per output to bind final temps to the user provided names.
         for name, tmp in final_temps.items():
-            src = temp_to_name.get(tmp, tmp)
-            ops.append(FlatOp('Equals', {'srcVar1': src}, name))
+            ops.append(FlatOp('Equals', {'srcVar1': tmp}, name))
 
         if optimize:
-            # Keep user-variable results and any temps they reference alive
-            live_temps: set[str] = set()
-            for op in ops:
-                is_user_var = op.result.startswith('$') and not op.result.startswith(
-                    '$tmp_'
-                )
-                if op.proxy == 'Equals' or is_user_var:
-                    live_temps.add(op.result)
-            ops = dead_code_elimination(ops, live_temps)
+            ops, consts, _ = constant_fold(ops, consts)
+            ops = dead_code_elimination(ops)
             ops = temp_reuse(ops)
 
         if format == 'readable':

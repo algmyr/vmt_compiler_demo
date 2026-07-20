@@ -35,6 +35,13 @@ def constant_fold(
             result_ops.append(op)
             continue
 
+        if op.proxy == 'Equals':
+            # Equals is a name binding — never fold it away.
+            # _patch_params resolves folded temps in its src param.
+            _patch_params(op.params, temp_to_val, name_to_val, new_consts)
+            result_ops.append(op)
+            continue
+
         # Resolve args — all must be constant
         args: list[float] = []
         foldable = True
@@ -70,14 +77,21 @@ def constant_fold(
     return result_ops, new_consts, temp_to_val
 
 
-def dead_code_elimination(ops: list[FlatOp], live_temps: set[str]) -> list[FlatOp]:
+def _is_user_var(name: str) -> bool:
+    return name.startswith('$') and not name.startswith('$tmp_')
+
+
+def dead_code_elimination(ops: list[FlatOp]) -> list[FlatOp]:
     """Remove ops whose result temp is never used as a source.
 
-    *live_temps* is the set of temps that must be kept (e.g. output temps).
     Walk ops in reverse: an op is kept if its result is in the live set,
     and its source temps are then added to the live set.
+
+    ``Equals`` ops and user-var results seed the live set — callers that
+    work with bare FlatOps (no ``Equals``) should append an ``Equals``
+    targeting the intended output temp before calling this function.
     """
-    live = set(live_temps)
+    live = {op.result for op in ops if op.proxy == 'Equals' or _is_user_var(op.result)}
     result: list[FlatOp] = []
     for op in reversed(ops):
         if op.result in live:
