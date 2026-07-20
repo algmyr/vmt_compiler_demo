@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from material_proxy.emit import emit_readable
 from material_proxy.emit import emit_vmt
 from material_proxy.expr import Expr
 from material_proxy.flatten import FlatOp
@@ -31,11 +32,14 @@ class Program:
         self,
         material_name: str = 'UnlitGeneric',
         optimize: bool = True,
+        format: str = 'vmt',
     ) -> str:
         """Flatten all outputs and emit a single VMT string.
 
         Each output gets an ``Equals`` proxy that copies the final temp
         to the user-specified variable name.
+
+        *format* can be ``'vmt'`` (default) or ``'readable'``.
         """
         flattener = Flattener()
 
@@ -74,4 +78,6 @@ class Program:
             ops = dead_code_elimination(ops, live_temps)
             ops = temp_reuse(ops)
 
+        if format == 'readable':
+            return emit_readable(ops, consts)
         return emit_vmt(ops, consts, material_name)
