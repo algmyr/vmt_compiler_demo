@@ -148,7 +148,7 @@ def test_hypothesis_full_pipeline(expr: Expr) -> None:
     except ZeroDivisionError:
         return  # runtime div-by-zero — skip
 
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     if not folded_ops:
         return  # fully constant — no optimisation to test
 

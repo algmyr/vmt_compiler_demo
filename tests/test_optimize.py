@@ -50,7 +50,7 @@ def test_fold_single_binary():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     assert len(folded_ops) == 0
     vmt = emit_vmt(folded_ops, folded_consts)
     state = interpret_vmt(vmt, EvalContext())
@@ -63,7 +63,7 @@ def test_fold_full_tree():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     assert len(folded_ops) == 0
     assert 15.0 in folded_consts
 
@@ -74,7 +74,7 @@ def test_fold_partial():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     # Neither op is fully constant — Mul($2, $x) depends on $x
     assert len(folded_ops) == 2
     ctx = EvalContext(vars={'$x': 3.0})
@@ -89,7 +89,7 @@ def test_fold_abs_neg():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     assert len(folded_ops) == 0
     assert 3.0 in folded_consts
 
@@ -101,7 +101,7 @@ def test_fold_chained():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     assert len(folded_ops) == 0
     assert 21.0 in folded_consts
 
@@ -116,7 +116,7 @@ def test_fold_no_side_effects():
     flattener = Flattener()
     flattener.flatten(expr)
     res = flattener.result()
-    folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
     vmt_folded = emit_vmt(folded_ops, folded_consts)
     state_folded = interpret_vmt(vmt_folded, ctx)
 
@@ -345,7 +345,7 @@ def test_reuse_pipeline_correctness_randomish():
         flat.flatten(expr)
         res = flat.result()
 
-        folded_ops, folded_consts, _ = constant_fold(res.ops, res.consts)
+        folded_ops, folded_consts = constant_fold(res.ops, res.consts)
         if folded_ops:
             out = FlatOp('Equals', {'srcVar1': folded_ops[-1].result}, '$pipeline_out')
             folded_ops.append(out)

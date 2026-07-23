@@ -57,7 +57,7 @@ class Program:
             ops.append(FlatOp('Equals', {'srcVar1': tmp}, name))
 
         if optimize:
-            ops, consts, _ = constant_fold(ops, consts)
+            ops, consts = constant_fold(ops, consts)
             ops = dead_code_elimination(ops)
             ops = temp_reuse(ops)
 

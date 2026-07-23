@@ -13,12 +13,10 @@ def _const_name(value: float) -> str:
 def constant_fold(
     ops: list[FlatOp],
     consts: dict[float, str],
-) -> tuple[list[FlatOp], dict[float, str], dict[str, float]]:
+) -> tuple[list[FlatOp], dict[float, str]]:
     """Fold ops where all sources are compile-time constants.
 
-    Returns ``(folded_ops, updated_consts, temp_to_val)`` where
-    *temp_to_val* maps folded temp names to their computed constant
-    values.
+    Returns ``(folded_ops, updated_consts)``.
     """
     name_to_val: dict[str, float] = {v: k for k, v in consts.items()}
     temp_to_val: dict[str, float] = {}
@@ -74,7 +72,7 @@ def constant_fold(
             _patch_params(op.params, temp_to_val, name_to_val, new_consts)
             result_ops.append(op)
 
-    return result_ops, new_consts, temp_to_val
+    return result_ops, new_consts
 
 
 def _is_user_var(name: str) -> bool:
