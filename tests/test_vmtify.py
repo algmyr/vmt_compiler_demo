@@ -11,11 +11,13 @@ from material_proxy import CurrentTime
 from material_proxy import EvalContext
 from material_proxy import Program
 from material_proxy import Var
+from material_proxy import full_optimize
 from material_proxy import interpret_vmt
+from material_proxy import no_optimize
 from material_proxy import vmtify
 
 
-def _compile_and_run(func, var_values: dict[str, float], optimize=True):
+def _compile_and_run(func, var_values: dict[str, float], optimize=full_optimize):
     """Helper: compile @vmtify-wrapped function, emit, interpret."""
     expr = func(*(Var(k) for k in var_values))
     prog = Program()
@@ -224,7 +226,7 @@ def test_compose():
     expr = clamp01(Var('x')) * 2
     prog = Program()
     prog.output('$result', expr)
-    vmt = prog.compile('test', optimize=False)
+    vmt = prog.compile('test', optimize=no_optimize)
 
     for val, expected in [(-0.5, 0.0), (0.3, 0.6), (1.5, 2.0)]:
         state = interpret_vmt(vmt, EvalContext(vars={'$x': val}))
@@ -268,7 +270,7 @@ def test_current_time():
 
     prog = Program()
     prog.output('$result', f())
-    vmt = prog.compile('test', optimize=False)
+    vmt = prog.compile('test', optimize=no_optimize)
     state = interpret_vmt(vmt, EvalContext(time=42.0))
     assert state['$result'] == approx(42.0)
 
@@ -406,8 +408,8 @@ def test_optimized_matches_unoptimized():
         return x + 1
 
     for val in [-10.0, -5.0, -2.0, 0.0, 3.0]:
-        unopt = _compile_and_run(f, {'x': val}, optimize=False)
-        opt = _compile_and_run(f, {'x': val}, optimize=True)
+        unopt = _compile_and_run(f, {'x': val}, optimize=no_optimize)
+        opt = _compile_and_run(f, {'x': val}, optimize=full_optimize)
         assert unopt['$result'] == approx(opt['$result'])
 
 

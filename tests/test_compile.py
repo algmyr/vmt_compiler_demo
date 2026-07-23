@@ -135,10 +135,10 @@ def test_program_multi_output():
 
 
 def test_program_constant_folding():
-    """Program with optimize=True folds constants."""
+    """Program folds constants."""
     p = Program()
     p.output('$result', Mul(Add(Const(1.0), Const(2.0)), Const(5.0)))
-    vmt = p.compile(optimize=True)
+    vmt = p.compile()
     ctx = EvalContext()
     state = interpret_vmt(vmt, ctx)
     assert state['$result'] == approx(15.0)

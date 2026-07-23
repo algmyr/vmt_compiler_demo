@@ -5,9 +5,8 @@ from material_proxy.emit import emit_vmt
 from material_proxy.expr import Expr
 from material_proxy.flatten import FlatOp
 from material_proxy.flatten import Flattener
-from material_proxy.optimize import constant_fold
-from material_proxy.optimize import dead_code_elimination
-from material_proxy.optimize import temp_reuse
+from material_proxy.optimize import OptimizeFn
+from material_proxy.optimize import full_optimize
 
 
 def compile_to_vmt(expr: Expr, material_name: str = 'UnlitGeneric') -> str:
@@ -31,13 +30,17 @@ class Program:
     def compile(
         self,
         material_name: str = 'UnlitGeneric',
-        optimize: bool = True,
+        optimize: OptimizeFn = full_optimize,
         format: str = 'vmt',
     ) -> str:
         """Flatten all outputs and emit a single VMT string.
 
         Each output gets an ``Equals`` proxy that copies the final temp
         to the user-specified variable name.
+
+        *optimize* is a callable ``(ops, consts) -> (ops, consts)`` that
+        applies optimization passes.  Defaults to :func:`full_optimize`.
+        Pass :func:`no_optimize` to skip optimization.
 
         *format* can be ``'vmt'`` (default) or ``'readable'``.
         """
@@ -56,10 +59,7 @@ class Program:
         for name, tmp in final_temps.items():
             ops.append(FlatOp('Equals', {'srcVar1': tmp}, name))
 
-        if optimize:
-            ops, consts = constant_fold(ops, consts)
-            ops = dead_code_elimination(ops)
-            ops = temp_reuse(ops)
+        ops, consts = optimize(ops, consts)
 
         if format == 'readable':
             return emit_readable(ops, consts)

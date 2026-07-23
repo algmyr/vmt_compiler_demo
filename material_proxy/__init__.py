@@ -23,7 +23,9 @@ __all__ = [
     'compile_to_vmt',
     'constant_fold',
     'dead_code_elimination',
+    'full_optimize',
     'interpret_vmt',
+    'no_optimize',
     'temp_reuse',
     'vmtify',
 ]
@@ -51,6 +53,8 @@ from material_proxy.interpret import EvalContext
 from material_proxy.interpret import interpret_vmt
 from material_proxy.optimize import constant_fold
 from material_proxy.optimize import dead_code_elimination
+from material_proxy.optimize import full_optimize
+from material_proxy.optimize import no_optimize
 from material_proxy.optimize import temp_reuse
 from material_proxy.program import Program
 from material_proxy.program import compile_to_vmt

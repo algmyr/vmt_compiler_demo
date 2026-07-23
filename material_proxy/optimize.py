@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from material_proxy._ops import COMPUTE
 from material_proxy._ops import PARAM_ORDER
 from material_proxy.flatten import FlatOp
+
+OptimizeFn = Callable[
+    [list[FlatOp], dict[float, str]], tuple[list[FlatOp], dict[float, str]]
+]
 
 
 def _const_name(value: float) -> str:
@@ -184,3 +190,20 @@ def _patch_params(
                 new_consts[val] = name
                 name_to_val[name] = val
             params[k] = name
+
+
+def no_optimize(
+    ops: list[FlatOp], consts: dict[float, str]
+) -> tuple[list[FlatOp], dict[float, str]]:
+    """Identity pipeline — returns ops and consts unchanged."""
+    return ops, consts
+
+
+def full_optimize(
+    ops: list[FlatOp], consts: dict[float, str]
+) -> tuple[list[FlatOp], dict[float, str]]:
+    """Run all optimizations: constant-fold, DCE, then temp reuse."""
+    ops, consts = constant_fold(ops, consts)
+    ops = dead_code_elimination(ops)
+    ops = temp_reuse(ops)
+    return ops, consts
