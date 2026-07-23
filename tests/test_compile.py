@@ -113,8 +113,7 @@ def test_horner_polynomial():
 
 def test_program_single_output():
     """Program with one output produces equivalent VMT to compile_to_vmt."""
-    p = Program()
-    p.output('$result', Add(Var('x'), Var('y')))
+    p = Program.from_tree(result=Add(Var('x'), Var('y')))
     vmt = p.compile()
     ctx = EvalContext(vars={'$x': 3.0, '$y': 4.0})
     state = interpret_vmt(vmt, ctx)
@@ -123,10 +122,8 @@ def test_program_single_output():
 
 def test_program_multi_output():
     """Program with multiple outputs, sharing CSE."""
-    p = Program()
     s = Add(Var('x'), Var('y'))
-    p.output('$sum', s)
-    p.output('$double', Mul(s, Const(2.0)))
+    p = Program.from_tree(sum=s, double=Mul(s, Const(2.0)))
     vmt = p.compile()
     ctx = EvalContext(vars={'$x': 3.0, '$y': 4.0})
     state = interpret_vmt(vmt, ctx)
@@ -136,8 +133,7 @@ def test_program_multi_output():
 
 def test_program_constant_folding():
     """Program folds constants."""
-    p = Program()
-    p.output('$result', Mul(Add(Const(1.0), Const(2.0)), Const(5.0)))
+    p = Program.from_tree(result=Mul(Add(Const(1.0), Const(2.0)), Const(5.0)))
     vmt = p.compile()
     ctx = EvalContext()
     state = interpret_vmt(vmt, ctx)

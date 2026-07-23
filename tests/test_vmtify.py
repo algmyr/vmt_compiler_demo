@@ -20,8 +20,7 @@ from material_proxy import vmtify
 def _compile_and_run(func, var_values: dict[str, float], optimize=full_optimize):
     """Helper: compile @vmtify-wrapped function, emit, interpret."""
     expr = func(*(Var(k) for k in var_values))
-    prog = Program()
-    prog.output('$result', expr)
+    prog = Program.from_tree(result=expr)
     vmt = prog.compile('test', optimize=optimize)
     ctx = EvalContext(vars={f'${k}': v for k, v in var_values.items()})
     return interpret_vmt(vmt, ctx)
@@ -224,8 +223,7 @@ def test_compose():
         return x
 
     expr = clamp01(Var('x')) * 2
-    prog = Program()
-    prog.output('$result', expr)
+    prog = Program.from_tree(result=expr)
     vmt = prog.compile('test', optimize=no_optimize)
 
     for val, expected in [(-0.5, 0.0), (0.3, 0.6), (1.5, 2.0)]:
@@ -268,8 +266,7 @@ def test_current_time():
     def f():
         return CurrentTime()
 
-    prog = Program()
-    prog.output('$result', f())
+    prog = Program.from_tree(result=f())
     vmt = prog.compile('test', optimize=no_optimize)
     state = interpret_vmt(vmt, EvalContext(time=42.0))
     assert state['$result'] == approx(42.0)
@@ -447,8 +444,7 @@ def test_nesting_e_any_v_any():
 
     # g(Var('v')) → halve(v) + 1 = v/2 + 1 → then * 3
     expr = g(Var('v')) * 3
-    prog = Program()
-    prog.output('$result', expr)
+    prog = Program.from_tree(result=expr)
     vmt = prog.compile('test')
 
     for val, expected in [(4.0, 9.0), (0.0, 3.0), (-6.0, -6.0)]:
@@ -467,8 +463,7 @@ def test_nesting_e_any_vv():
 
     # double_inc(Var('v')) → (v + 1) * 2 → then - 1
     expr = double_inc(Var('v')) - 1
-    prog = Program()
-    prog.output('$result', expr)
+    prog = Program.from_tree(result=expr)
     vmt = prog.compile('test')
 
     for val, expected in [(5.0, 11.0), (0.0, 1.0), (-2.0, -3.0)]:

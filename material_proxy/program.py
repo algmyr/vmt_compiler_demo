@@ -18,14 +18,50 @@ def compile_to_vmt(expr: Expr, material_name: str = 'UnlitGeneric') -> str:
 
 
 class Program:
-    """Container tying flatten + emit together for one or more outputs."""
+    """Compiled material program backed by a flat op list."""
 
-    def __init__(self) -> None:
-        self._outputs: list[tuple[str, Expr]] = []
+    def __init__(
+        self,
+        ops: list[FlatOp],
+        consts: dict[float, str],
+    ) -> None:
+        self._ops = list(ops)
+        self._consts = dict(consts)
 
-    def output(self, name: str, expr: Expr) -> None:
-        """Declare an output variable bound to *expr*."""
-        self._outputs.append((name, expr))
+    @classmethod
+    def from_tree(cls, **outputs: Expr) -> Program:
+        """Flatten one or more named expression trees into a Program.
+
+        Each keyword argument becomes an output variable — `$` is
+        prepended to the key automatically:
+
+            prog = Program.from_tree(result=Add(x, y))      # → $result
+            prog = Program.from_tree(sum=s, double=Mul(s, 2))  # → $sum, $double
+        """
+        flattener = Flattener()
+        result_outputs: list[tuple[str, str]] = []
+        for key, expr in outputs.items():
+            name = f'${key}'
+            tmp = flattener.flatten(expr)
+            result_outputs.append((name, tmp))
+
+        res = flattener.result()
+        ops: list[FlatOp] = list(res.ops)
+        for name, tmp in result_outputs:
+            ops.append(FlatOp('Equals', {'srcVar1': tmp}, name))
+        return cls(ops, res.consts)
+
+    @classmethod
+    def from_flat(
+        cls,
+        ops: list[FlatOp],
+        consts: dict[float, str],
+    ) -> Program:
+        """Wrap pre-flattened ops and constants.
+
+        Outputs must already be encoded as `Equals` ops in *ops*.
+        """
+        return cls(ops, consts)
 
     def compile(
         self,
@@ -33,32 +69,16 @@ class Program:
         optimize: OptimizeFn = full_optimize,
         format: str = 'vmt',
     ) -> str:
-        """Flatten all outputs and emit a single VMT string.
+        """Emit a VMT string.
 
-        Each output gets an ``Equals`` proxy that copies the final temp
-        to the user-specified variable name.
-
-        *optimize* is a callable ``(ops, consts) -> (ops, consts)`` that
+        *optimize* is a callable `(ops, consts) -> (ops, consts)` that
         applies optimization passes.  Defaults to :func:`full_optimize`.
         Pass :func:`no_optimize` to skip optimization.
 
-        *format* can be ``'vmt'`` (default) or ``'readable'``.
+        *format* can be `'vmt'` (default) or `'readable'`.
         """
-        flattener = Flattener()
-
-        final_temps: dict[str, str] = {}
-        for name, expr in self._outputs:
-            tmp = flattener.flatten(expr)
-            final_temps[name] = tmp
-
-        res = flattener.result()
-        ops = list(res.ops)
-        consts = res.consts
-
-        # Append Equals per output to bind final temps to the user provided names.
-        for name, tmp in final_temps.items():
-            ops.append(FlatOp('Equals', {'srcVar1': tmp}, name))
-
+        ops = list(self._ops)
+        consts = dict(self._consts)
         ops, consts = optimize(ops, consts)
 
         if format == 'readable':

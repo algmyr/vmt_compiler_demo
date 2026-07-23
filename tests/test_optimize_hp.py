@@ -13,14 +13,14 @@ from material_proxy import Expr
 from material_proxy import Frac
 from material_proxy import Int
 from material_proxy import Mul
+from material_proxy import Program
 from material_proxy import Sub
 from material_proxy import Var
+from material_proxy import full_optimize
+from material_proxy import interpret_vmt
+from material_proxy import no_optimize
 from material_proxy.emit import emit_vmt
-from material_proxy.flatten import FlatOp
 from material_proxy.flatten import Flattener
-from material_proxy.interpret import interpret_vmt
-from material_proxy.optimize import constant_fold
-from material_proxy.optimize import dead_code_elimination
 from material_proxy.optimize import temp_reuse
 
 
@@ -134,34 +134,15 @@ def test_hypothesis_temp_reuse_semantics(expr: Expr) -> None:
 @hp_settings(max_examples=100)
 @given(_expr)
 def test_hypothesis_full_pipeline(expr: Expr) -> None:
-    """Random expression: fold → DCE → temp_reuse preserves result."""
-    flat = Flattener()
-    flat.flatten(expr)
-    res = flat.result()
-    if not res.ops:
-        return
-
-    # Unoptimised reference
-    raw_vmt = emit_vmt(res.ops, res.consts)
+    """Random expression: fold → DCE → temp_reuse preserves result via Program."""
+    prog = Program.from_tree(result=expr)
     try:
-        raw_state = interpret_vmt(raw_vmt, _ctx)
+        raw_state = interpret_vmt(prog.compile(optimize=no_optimize), _ctx)
+        opt_state = interpret_vmt(prog.compile(optimize=full_optimize), _ctx)
     except ZeroDivisionError:
         return  # runtime div-by-zero — skip
 
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    if not folded_ops:
-        return  # fully constant — no optimisation to test
-
-    folded_ops.append(FlatOp('Equals', {'srcVar1': folded_ops[-1].result}, '$hp_out'))
-    dce_ops = dead_code_elimination(folded_ops)
-    final_ops = temp_reuse(dce_ops)
-    opt_vmt = emit_vmt(final_ops, folded_consts)
-    try:
-        opt_state = interpret_vmt(opt_vmt, _ctx)
-    except ZeroDivisionError:
-        return  # runtime div-by-zero — skip
-
-    raw_final = _last_result(raw_state)
-    opt_vals = [v for v in opt_state.values() if isinstance(v, (int, float))]
-    if math.isfinite(raw_final):
-        assert any(abs(v - raw_final) < 1e-6 for v in opt_vals)
+    raw_val = raw_state['$result']
+    opt_val = opt_state['$result']
+    if math.isfinite(raw_val):
+        assert abs(opt_val - raw_val) < 1e-6

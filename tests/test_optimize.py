@@ -10,9 +10,11 @@ from material_proxy import Div
 from material_proxy import EvalContext
 from material_proxy import Expr
 from material_proxy import Mul
+from material_proxy import Program
 from material_proxy import Sub
 from material_proxy import Var
 from material_proxy import compile_to_vmt
+from material_proxy import full_optimize
 from material_proxy import interpret_vmt
 from material_proxy.emit import emit_vmt
 from material_proxy.flatten import FlatOp
@@ -341,22 +343,10 @@ def test_reuse_pipeline_correctness_randomish():
         }
     )
     for expr, expected in cases:
-        flat = Flattener()
-        flat.flatten(expr)
-        res = flat.result()
-
-        folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-        if folded_ops:
-            out = FlatOp('Equals', {'srcVar1': folded_ops[-1].result}, '$pipeline_out')
-            folded_ops.append(out)
-        dce_ops = dead_code_elimination(folded_ops)
-        final_ops = temp_reuse(dce_ops)
-        opt_vmt = emit_vmt(final_ops, folded_consts)
-        got = interpret_vmt(opt_vmt, ctx)
-        # _last_result is unreliable after temp_reuse renumbers temps,
-        # so verify against the known expected value instead.
-        vals = [v for v in got.values() if isinstance(v, (int, float))]
-        assert expected in vals or any(abs(v - expected) < 1e-9 for v in vals)
+        prog = Program.from_tree(result=expr)
+        vmt = prog.compile(optimize=full_optimize)
+        state = interpret_vmt(vmt, ctx)
+        assert state['$result'] == approx(expected)
 
 
 def test_reuse_flow_graph_with_fork():
