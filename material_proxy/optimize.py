@@ -22,26 +22,33 @@ def constant_fold(
 ) -> tuple[list[FlatOp], dict[float, str]]:
     """Fold ops where all sources are compile-time constants.
 
-    Returns ``(folded_ops, updated_consts)``.
+    Also removes identity/zero ops (``Add 0``, ``Mul 1``, etc.) via
+    temp-to-temp aliasing.  Callers should run DCE afterwards to drop
+    ops whose results become dead through aliasing.
     """
     name_to_val: dict[str, float] = {v: k for k, v in consts.items()}
     temp_to_val: dict[str, float] = {}
+    alias: dict[str, str] = {}
     new_consts: dict[float, str] = dict(consts)
     result_ops: list[FlatOp] = []
 
     for op in ops:
+        # Chase alias chain on every param value so that references to
+        # identity-aliased temps are resolved before any further checks.
+        for k, v in op.params.items():
+            while v in alias:
+                v = alias[v]
+                op.params[k] = v
+
         fn = COMPUTE.get(op.proxy)
         param_keys = PARAM_ORDER.get(op.proxy)
 
         if fn is None or param_keys is None:
-            # Source proxies (CurrentTime, PlayerPosition, etc.) can't fold
             _patch_params(op.params, temp_to_val, name_to_val, new_consts)
             result_ops.append(op)
             continue
 
         if op.proxy == 'Equals':
-            # Equals is a name binding — never fold it away.
-            # _patch_params resolves folded temps in its src param.
             _patch_params(op.params, temp_to_val, name_to_val, new_consts)
             result_ops.append(op)
             continue
@@ -66,7 +73,6 @@ def constant_fold(
             try:
                 computed = fn(*args)
                 temp_to_val[op.result] = computed
-                # Ensure the folded constant is in the constants table
                 if computed not in new_consts:
                     name = _const_name(computed)
                     new_consts[computed] = name
@@ -76,9 +82,47 @@ def constant_fold(
 
         if not foldable:
             _patch_params(op.params, temp_to_val, name_to_val, new_consts)
+
+            # Try identity/zero rules using the patched param names
+            if _try_identity_alias(op, name_to_val, alias):
+                continue
+
             result_ops.append(op)
 
     return result_ops, new_consts
+
+
+def _try_identity_alias(
+    op: FlatOp,
+    name_to_val: dict[str, float],
+    alias: dict[str, str],
+) -> bool:
+    src1 = op.params.get('srcVar1', '')
+    src2 = op.params.get('srcVar2', '')
+    v1 = name_to_val.get(src1)
+    v2 = name_to_val.get(src2)
+
+    match (op.proxy, v1, v2):
+        case ('Add', 0.0, _):
+            alias[op.result] = src2
+        case ('Add', _, 0.0):
+            alias[op.result] = src1
+        case ('Subtract', _, 0.0):
+            alias[op.result] = src1
+        case ('Multiply', 0.0, _) | ('Multiply', _, 0.0):
+            zero = src1 if v1 == 0.0 else src2
+            alias[op.result] = zero
+        case ('Multiply', 1.0, _):
+            alias[op.result] = src2
+        case ('Multiply', _, 1.0):
+            alias[op.result] = src1
+        case ('Divide', 0.0, _) if v2 != 0.0:
+            alias[op.result] = src1
+        case ('Divide', _, 1.0):
+            alias[op.result] = src1
+        case _:
+            return False
+    return True
 
 
 def _is_user_var(name: str) -> bool:

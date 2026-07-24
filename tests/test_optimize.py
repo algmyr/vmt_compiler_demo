@@ -87,7 +87,157 @@ def test_fold_no_side_effects():
     assert last_temp_result(state_normal) == approx(15.0)
 
 
-# ---- Dead code elimination --------------------------------------------------
+# ---- Identity / zero aliasing (inside constant_fold) ------------------------
+
+
+def _fold_and_emit(ops: list[FlatOp], consts: dict[float, str]) -> str:
+    """Helper: run constant_fold on flat ops and emit the result."""
+    from material_proxy.emit import emit_vmt
+
+    folded_ops, folded_consts = constant_fold(list(ops), dict(consts))
+    return emit_vmt(folded_ops, folded_consts)
+
+
+def _fold_ops(ops: list[FlatOp], consts: dict[float, str]) -> list[FlatOp]:
+    """Helper: run constant_fold and return the remaining ops."""
+    folded_ops, _ = constant_fold(list(ops), dict(consts))
+    return folded_ops
+
+
+def test_identity_aliased_result_not_emitted():
+    """Add(0, x) — op is removed, result is aliased to x."""
+    ops = [FlatOp('Add', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_propagation():
+    """Add(0, x) then Sub(result, 0) — both ops aliased away."""
+    ops = [
+        FlatOp('Add', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1'),
+        FlatOp('Subtract', {'srcVar1': '$tmp_1', 'srcVar2': '$0.0'}, '$tmp_2'),
+    ]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_correctness():
+    """Add(0, $x) followed by Equals gives $x unchanged."""
+    ops = [
+        FlatOp('Add', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1'),
+        FlatOp('Equals', {'srcVar1': '$tmp_1'}, 'result'),
+    ]
+    vmt = _fold_and_emit(ops, {0.0: '$0.0'})
+    state = interpret_vmt(vmt, EvalContext(vars={'$x': 42.0}))
+    assert state.get('$result', state.get('result')) == approx(42.0)
+
+
+def test_identity_add_zero_left():
+    """Add(0.0, x) — aliased to x."""
+    ops = [FlatOp('Add', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_add_zero_right():
+    """Add(x, 0.0) — aliased to x."""
+    ops = [FlatOp('Add', {'srcVar1': '$x', 'srcVar2': '$0.0'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_sub_zero():
+    """Sub(x, 0.0) — aliased to x."""
+    ops = [FlatOp('Subtract', {'srcVar1': '$x', 'srcVar2': '$0.0'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_mul_zero_left():
+    """Mul(0.0, x) — aliased to $0.0."""
+    ops = [FlatOp('Multiply', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+    vmt = _fold_and_emit(
+        ops + [FlatOp('Equals', {'srcVar1': '$tmp_1'}, 'out')],
+        {0.0: '$0.0'},
+    )
+    state = interpret_vmt(vmt, EvalContext(vars={'$x': 99.0}))
+    val = state.get('$out', state.get('out', state.get('$0.0')))
+    assert val == approx(0.0)
+
+
+def test_identity_mul_zero_right():
+    """Mul(x, 0.0) — aliased to $0.0."""
+    ops = [FlatOp('Multiply', {'srcVar1': '$x', 'srcVar2': '$0.0'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_mul_one_left():
+    """Mul(1.0, x) — aliased to x."""
+    ops = [FlatOp('Multiply', {'srcVar1': '$1.0', 'srcVar2': '$x'}, '$tmp_1')]
+    result = _fold_ops(ops, {1.0: '$1.0'})
+    assert len(result) == 0
+
+
+def test_identity_mul_one_right():
+    """Mul(x, 1.0) — aliased to x."""
+    ops = [FlatOp('Multiply', {'srcVar1': '$x', 'srcVar2': '$1.0'}, '$tmp_1')]
+    result = _fold_ops(ops, {1.0: '$1.0'})
+    assert len(result) == 0
+
+
+def test_identity_div_one():
+    """Div(x, 1.0) — aliased to x."""
+    ops = [FlatOp('Divide', {'srcVar1': '$x', 'srcVar2': '$1.0'}, '$tmp_1')]
+    result = _fold_ops(ops, {1.0: '$1.0'})
+    assert len(result) == 0
+
+
+def test_identity_div_zero_num():
+    """Div(0.0, x) — aliased to $0.0."""
+    ops = [FlatOp('Divide', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1')]
+    result = _fold_ops(ops, {0.0: '$0.0'})
+    assert len(result) == 0
+
+
+def test_identity_not_foldable_kept():
+    """Add(x, y) — neither identity nor constant fold applies."""
+    ops = [FlatOp('Add', {'srcVar1': '$x', 'srcVar2': '$y'}, '$tmp_1')]
+    result = _fold_ops(ops, {})
+    assert len(result) == 1
+
+
+def test_identity_chained_through_equals():
+    """Add(0, x) then Equals — Equals sees the aliased temp."""
+    ops = [
+        FlatOp('Add', {'srcVar1': '$0.0', 'srcVar2': '$x'}, '$tmp_1'),
+        FlatOp('Equals', {'srcVar1': '$tmp_1'}, 'out'),
+    ]
+    vmt = _fold_and_emit(ops, {0.0: '$0.0'})
+    state = interpret_vmt(vmt, EvalContext(vars={'$x': 7.0}))
+    val = state.get('$out', state.get('out'))
+    assert val == approx(7.0)
+
+
+def test_identity_full_pipeline_example():
+    """The motivating example: (1+x)*4.3e-08*0 + x → x after full optimize."""
+    tmp = Mul(Mul(Add(Const(1.0), Var('x')), Const(4.3e-08)), Const(0.0))
+    expr = Add(tmp, Var('x'))
+    prog = Program.from_tree(result=expr)
+    # After constant_fold alone, Equals should reference $x directly
+    folded = prog.optimize(constant_fold)
+    eq = next(op for op in folded.ops if op.proxy == 'Equals')
+    assert eq.params['srcVar1'] == '$x'
+    # After full optimize, only Equals remains
+    full = prog.optimize(full_optimize)
+    assert len(full.ops) == 1
+    assert full.ops[0].proxy == 'Equals'
+    # Correctness
+    vmt = full.emit()
+    state = interpret_vmt(vmt, EvalContext(vars={'$x': 3.0}))
+    assert state['$result'] == approx(3.0)
 
 
 def test_dce_removes_unused():
