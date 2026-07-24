@@ -353,6 +353,9 @@ def peephole_optimize(
                 loe is not None
                 and src not in not_map
                 and loe_total_use.get(src, 0) == 1
+                and loe[2] in ('$0.0', '$1.0')
+                and loe[3] in ('$0.0', '$1.0')
+                and loe[2] != loe[3]
             ):
                 neg_absorb[op.result] = src
 
@@ -379,7 +382,7 @@ def peephole_optimize(
         transformed_to_truthy = False
         if not neg_absorbed and op.result in not_map:
             src = not_map[op.result]
-            if src in not_map:
+            if src in not_map and src not in neg_absorb:
                 ultimate = not_map[src]
                 op.params = {
                     'srcVar1': ultimate,
