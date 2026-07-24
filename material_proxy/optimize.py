@@ -236,6 +236,61 @@ def _patch_params(
             params[k] = name
 
 
+def peephole_optimize(
+    ops: list[FlatOp], consts: dict[float, str]
+) -> tuple[list[FlatOp], dict[float, str]]:
+    """Peephole rewrites on FlatOps.
+
+    ``_is_truthy`` fusion:
+      ``LessOrEqual(cond, 0, 0, 1)`` followed by
+      ``LessOrEqual(result, 0, el, th)``  ->  ``LessOrEqual(cond, 0, el, th)``
+    """
+    truthy: dict[str, str] = {}
+    for op in ops:
+        match op:
+            case FlatOp(
+                'LessOrEqual',
+                {
+                    'srcVar2': '$0.0',
+                    'lessEqualVar': '$0.0',
+                    'greaterVar': '$1.0',
+                },
+                _,
+            ):
+                truthy[op.result] = op.params['srcVar1']
+
+    total_use: dict[str, int] = {}
+    rewire_use: dict[str, int] = {}
+    for op in ops:
+        for v in op.params.values():
+            if v in truthy:
+                total_use[v] = total_use.get(v, 0) + 1
+        match op:
+            case FlatOp('LessOrEqual', {'srcVar2': '$0.0'}, _) if (
+                op.params.get('srcVar1') in truthy
+            ):
+                rewire_use[op.params['srcVar1']] = (
+                    rewire_use.get(op.params['srcVar1'], 0) + 1
+                )
+
+    result: list[FlatOp] = []
+    for op in ops:
+        if op.result in truthy:
+            remaining = total_use.get(op.result, 0) - rewire_use.get(op.result, 0)
+            if remaining == 0:
+                continue
+        match op:
+            case FlatOp('LessOrEqual', {'srcVar2': '$0.0'}, _) if (
+                op.params.get('srcVar1') in truthy
+            ):
+                src = op.params['srcVar1']
+                while src in truthy:
+                    src = truthy[src]
+                op.params['srcVar1'] = src
+        result.append(op)
+    return result, consts
+
+
 def no_optimize(
     ops: list[FlatOp], consts: dict[float, str]
 ) -> tuple[list[FlatOp], dict[float, str]]:
@@ -246,8 +301,9 @@ def no_optimize(
 def full_optimize(
     ops: list[FlatOp], consts: dict[float, str]
 ) -> tuple[list[FlatOp], dict[float, str]]:
-    """Run all optimizations: constant-fold, DCE, then temp reuse."""
+    """Run all optimizations: constant-fold, peephole, DCE, then temp reuse."""
     ops, consts = constant_fold(ops, consts)
+    ops, consts = peephole_optimize(ops, consts)
     ops = dead_code_elimination(ops)
     ops = temp_reuse(ops)
     return ops, consts
