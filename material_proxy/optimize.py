@@ -244,9 +244,47 @@ def peephole_optimize(
     ``_is_truthy`` fusion:
       ``LessOrEqual(cond, 0, 0, 1)`` followed by
       ``LessOrEqual(result, 0, el, th)``  ->  ``LessOrEqual(cond, 0, el, th)``
+
+    Identity aliases (skipped; DCE cleans up dead ops):
+      * ``LessOrEqual(x, y, c, c)`` ->  result aliases to ``c``
+      * ``SelectFirstIfNonZero(x, x)`` ->  result aliases to ``x``
+      * ``SelectFirstIfNonZero(0, x)`` ->  result aliases to ``x``
     """
-    truthy: dict[str, str] = {}
+    # --- Pre-pass: resolve identity aliases ---------------------------------
+    identity_alias: dict[str, str] = {}
     for op in ops:
+        match op:
+            case FlatOp(
+                'LessOrEqual',
+                p,
+                _,
+            ) if p.get('lessEqualVar') == p.get('greaterVar'):
+                identity_alias[op.result] = p['lessEqualVar']
+            case FlatOp(
+                'SelectFirstIfNonZero',
+                {'srcVar1': a, 'srcVar2': b},
+                _,
+            ) if a == b:
+                identity_alias[op.result] = a
+            case FlatOp(
+                'SelectFirstIfNonZero',
+                {'srcVar1': '$0.0', 'srcVar2': b},
+                _,
+            ):
+                identity_alias[op.result] = b
+
+    cleaned: list[FlatOp] = []
+    for op in ops:
+        for k, v in list(op.params.items()):
+            while v in identity_alias:
+                v = identity_alias[v]
+                op.params[k] = v
+        if op.result not in identity_alias:
+            cleaned.append(op)
+
+    # --- Truthy fusion stages (operate on *cleaned* ops) --------------------
+    truthy: dict[str, str] = {}
+    for op in cleaned:
         match op:
             case FlatOp(
                 'LessOrEqual',
@@ -261,7 +299,7 @@ def peephole_optimize(
 
     total_use: dict[str, int] = {}
     rewire_use: dict[str, int] = {}
-    for op in ops:
+    for op in cleaned:
         for v in op.params.values():
             if v in truthy:
                 total_use[v] = total_use.get(v, 0) + 1
@@ -274,7 +312,7 @@ def peephole_optimize(
                 )
 
     result: list[FlatOp] = []
-    for op in ops:
+    for op in cleaned:
         if op.result in truthy:
             remaining = total_use.get(op.result, 0) - rewire_use.get(op.result, 0)
             if remaining == 0:
