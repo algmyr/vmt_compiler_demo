@@ -28,11 +28,21 @@ class Program:
         self._ops = list(ops)
         self._consts = dict(consts)
 
+    @property
+    def ops(self) -> list[FlatOp]:
+        """Flat op list (copy)."""
+        return list(self._ops)
+
+    @property
+    def consts(self) -> dict[float, str]:
+        """Constant table (copy)."""
+        return dict(self._consts)
+
     @classmethod
     def from_tree(cls, **outputs: Expr) -> Program:
         """Flatten one or more named expression trees into a Program.
 
-        Each keyword argument becomes an output variable — `$` is
+        Each keyword argument becomes an output variable — ``$`` is
         prepended to the key automatically:
 
             prog = Program.from_tree(result=Add(x, y))      # → $result
@@ -59,9 +69,23 @@ class Program:
     ) -> Program:
         """Wrap pre-flattened ops and constants.
 
-        Outputs must already be encoded as `Equals` ops in *ops*.
+        Outputs must already be encoded as ``Equals`` ops in *ops*.
         """
         return cls(ops, consts)
+
+    def optimize(self, optimize_fn: OptimizeFn = full_optimize) -> Program:
+        """Apply *optimize_fn* and return a new Program with the result.
+
+        The original program is unchanged.
+        """
+        ops, consts = optimize_fn(list(self._ops), dict(self._consts))
+        return Program(ops, consts)
+
+    def emit(self, material_name: str = 'UnlitGeneric', format: str = 'vmt') -> str:
+        """Emit the program as a VMT (default) or readable string."""
+        if format == 'readable':
+            return emit_readable(self._ops, self._consts)
+        return emit_vmt(self._ops, self._consts, material_name)
 
     def compile(
         self,
@@ -69,18 +93,5 @@ class Program:
         optimize: OptimizeFn = full_optimize,
         format: str = 'vmt',
     ) -> str:
-        """Emit a VMT string.
-
-        *optimize* is a callable `(ops, consts) -> (ops, consts)` that
-        applies optimization passes.  Defaults to :func:`full_optimize`.
-        Pass :func:`no_optimize` to skip optimization.
-
-        *format* can be `'vmt'` (default) or `'readable'`.
-        """
-        ops = list(self._ops)
-        consts = dict(self._consts)
-        ops, consts = optimize(ops, consts)
-
-        if format == 'readable':
-            return emit_readable(ops, consts)
-        return emit_vmt(ops, consts, material_name)
+        """Shorthand for ``prog.optimize(optimize).emit(material_name, format)``."""
+        return self.optimize(optimize).emit(material_name, format)

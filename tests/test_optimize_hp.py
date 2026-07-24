@@ -19,20 +19,7 @@ from material_proxy import Var
 from material_proxy import full_optimize
 from material_proxy import interpret_vmt
 from material_proxy import no_optimize
-from material_proxy.emit import emit_vmt
-from material_proxy.flatten import Flattener
-from material_proxy.optimize import temp_reuse
-
-
-def _last_result(state: dict[str, float]) -> float:
-    """Find the highest-numbered ``$tmp_N`` value."""
-    key = max(
-        (k for k in state if k.startswith('$tmp_')),
-        key=lambda k: int(k.removeprefix('$tmp_')),
-        default=None,
-    )
-    return state[key] if key is not None else next(iter(state.values()))
-
+from tests._test_helpers import reuse_only
 
 _ctx = EvalContext(
     vars={
@@ -113,22 +100,19 @@ _expr = _expr_raw.filter(lambda e: _node_count(e) <= _EXPR_MAX_NODES)
 @given(_expr)
 def test_hypothesis_temp_reuse_semantics(expr: Expr) -> None:
     """Random expression: temp_reuse alone preserves the VMT result."""
-    flat = Flattener()
-    flat.flatten(expr)
-    res = flat.result()
-    if not res.ops:
-        return  # no temps to reuse (e.g. bare Var or Const)
-    raw_vmt = emit_vmt(res.ops, res.consts)
-    reused_vmt = emit_vmt(temp_reuse(res.ops), res.consts)
+    prog = Program.from_tree(result=expr)
+    # bare Const or Var produce only the Equals op — no temps to reassign
+    if all(op.proxy == 'Equals' for op in prog.ops):
+        return
     try:
-        raw_state = interpret_vmt(raw_vmt, _ctx)
-        reused_state = interpret_vmt(reused_vmt, _ctx)
+        raw_state = interpret_vmt(prog.emit(), _ctx)
+        reused_state = interpret_vmt(prog.optimize(reuse_only).emit(), _ctx)
     except ZeroDivisionError:
-        return  # runtime div-by-zero — skip
-    raw_final = _last_result(raw_state)
-    reused_vals = [v for v in reused_state.values() if isinstance(v, (int, float))]
-    if math.isfinite(raw_final):
-        assert any(abs(v - raw_final) < 1e-6 for v in reused_vals)
+        return
+    raw_val = raw_state['$result']
+    reused_val = reused_state['$result']
+    if math.isfinite(raw_val):
+        assert abs(reused_val - raw_val) < 1e-6
 
 
 @hp_settings(max_examples=100)
@@ -140,7 +124,7 @@ def test_hypothesis_full_pipeline(expr: Expr) -> None:
         raw_state = interpret_vmt(prog.compile(optimize=no_optimize), _ctx)
         opt_state = interpret_vmt(prog.compile(optimize=full_optimize), _ctx)
     except ZeroDivisionError:
-        return  # runtime div-by-zero — skip
+        return
 
     raw_val = raw_state['$result']
     opt_val = opt_state['$result']

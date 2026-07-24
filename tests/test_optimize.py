@@ -14,116 +14,77 @@ from material_proxy import Program
 from material_proxy import Sub
 from material_proxy import Var
 from material_proxy import compile_to_vmt
+from material_proxy import constant_fold
 from material_proxy import full_optimize
 from material_proxy import interpret_vmt
-from material_proxy.emit import emit_vmt
 from material_proxy.flatten import FlatOp
-from material_proxy.flatten import Flattener
-from material_proxy.optimize import constant_fold
-from material_proxy.optimize import dead_code_elimination
-from material_proxy.optimize import temp_reuse
-
-
-def _last_result(state: dict[str, float]) -> float:
-    """Find the highest-numbered ``$tmp_N`` value."""
-    key = max(
-        (k for k in state if k.startswith('$tmp_')),
-        key=lambda k: int(k.removeprefix('$tmp_')),
-        default=None,
-    )
-    return state[key] if key is not None else next(iter(state.values()))
-
-
-def _max_temp(ops: list[FlatOp]) -> int:
-    """Maximum ``$tmp_N`` index in *ops* (0 if none)."""
-    n = 0
-    for op in ops:
-        if op.result.startswith('$tmp_'):
-            n = max(n, int(op.result.removeprefix('$tmp_')))
-    return n
-
+from tests._test_helpers import dce_only
+from tests._test_helpers import last_temp_result
+from tests._test_helpers import max_temp_index
+from tests._test_helpers import reuse_only
 
 # ---- Constant folding -------------------------------------------------------
 
 
 def test_fold_single_binary():
-    """Div($6.0, $2.0) → constant folded, no divide in output."""
-    expr = Div(Const(6.0), Const(2.0))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    assert len(folded_ops) == 0
-    vmt = emit_vmt(folded_ops, folded_consts)
+    """Div(6.0, 3.0) — constant folded, only Equals remains."""
+    prog = Program.from_tree(result=Div(Const(6.0), Const(3.0)))
+    folded = prog.optimize(constant_fold)
+    assert len(folded.ops) == 1
+    assert folded.ops[0].proxy == 'Equals'
+    vmt = folded.emit()
     state = interpret_vmt(vmt, EvalContext())
-    assert state.get('$3.0') == approx(3.0)
+    assert state['$result'] == approx(2.0)
 
 
 def test_fold_full_tree():
     """Entirely constant expression fully folded."""
-    expr = Mul(Add(Const(1.0), Const(2.0)), Const(5.0))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    assert len(folded_ops) == 0
-    assert 15.0 in folded_consts
+    prog = Program.from_tree(result=Mul(Add(Const(1.0), Const(2.0)), Const(5.0)))
+    folded = prog.optimize(constant_fold)
+    assert len(folded.ops) == 1
+    assert folded.ops[0].proxy == 'Equals'
+    assert 15.0 in folded.consts
 
 
 def test_fold_partial():
     """Mixed constant and variable — only constant parts fold."""
-    expr = Add(Mul(Const(2.0), Var('x')), Const(5.0))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    # Neither op is fully constant — Mul($2, $x) depends on $x
-    assert len(folded_ops) == 2
+    prog = Program.from_tree(result=Add(Mul(Const(2.0), Var('x')), Const(5.0)))
+    folded = prog.optimize(constant_fold)
+    assert len(folded.ops) == 3
     ctx = EvalContext(vars={'$x': 3.0})
-    vmt = emit_vmt(folded_ops, folded_consts)
-    state = interpret_vmt(vmt, ctx)
-    assert _last_result(state) == approx(11.0)
+    folded_vmt = folded.emit()
+    state = interpret_vmt(folded_vmt, ctx)
+    assert state['$result'] == approx(11.0)
 
 
 def test_fold_abs_neg():
     """Abs folded at compile time."""
-    expr = Abs(Const(-3.0))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    assert len(folded_ops) == 0
-    assert 3.0 in folded_consts
+    prog = Program.from_tree(result=Abs(Const(-3.0)))
+    folded = prog.optimize(constant_fold)
+    assert len(folded.ops) == 1
+    assert folded.ops[0].proxy == 'Equals'
+    assert 3.0 in folded.consts
 
 
 def test_fold_chained():
     """Chained constant expressions all fold."""
     inner = Add(Const(1.0), Const(2.0))
-    expr = Mul(inner, Add(Const(3.0), Const(4.0)))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    assert len(folded_ops) == 0
-    assert 21.0 in folded_consts
+    prog = Program.from_tree(result=Mul(inner, Add(Const(3.0), Const(4.0))))
+    folded = prog.optimize(constant_fold)
+    assert len(folded.ops) == 1
+    assert folded.ops[0].proxy == 'Equals'
+    assert 21.0 in folded.consts
 
 
 def test_fold_no_side_effects():
     """Folding produces same numerical result as non-folded compilation."""
     expr = Mul(Add(Const(1.0), Const(2.0)), Var('x'))
+    prog = Program.from_tree(result=expr)
     ctx = EvalContext(vars={'$x': 5.0})
-    vmt_normal = compile_to_vmt(expr)
-    state_normal = interpret_vmt(vmt_normal, ctx)
-
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    folded_ops, folded_consts = constant_fold(res.ops, res.consts)
-    vmt_folded = emit_vmt(folded_ops, folded_consts)
-    state_folded = interpret_vmt(vmt_folded, ctx)
-
-    assert _last_result(state_folded) == approx(15.0)
-    assert _last_result(state_normal) == approx(15.0)
+    state_raw = interpret_vmt(prog.compile(optimize=constant_fold), ctx)
+    state_normal = interpret_vmt(compile_to_vmt(expr), ctx)
+    assert state_raw['$result'] == approx(15.0)
+    assert last_temp_result(state_normal) == approx(15.0)
 
 
 # ---- Dead code elimination --------------------------------------------------
@@ -137,7 +98,8 @@ def test_dce_removes_unused():
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$5'}, '$tmp_3'),
         FlatOp('Equals', {'srcVar1': '$tmp_3'}, 'out'),
     ]
-    result = dead_code_elimination(ops)
+    prog = Program.from_flat(ops, {}).optimize(dce_only)
+    result = prog.ops
     assert len(result) == 3
     assert result[0].proxy == 'Add'
     assert result[0].result == '$tmp_1'
@@ -152,8 +114,8 @@ def test_dce_keeps_all():
         FlatOp('Add', {'srcVar1': '$tmp_1', 'srcVar2': '$z'}, '$tmp_2'),
         FlatOp('Equals', {'srcVar1': '$tmp_2'}, 'out'),
     ]
-    result = dead_code_elimination(ops)
-    assert len(result) == 3
+    prog = Program.from_flat(ops, {}).optimize(dce_only)
+    assert len(prog.ops) == 3
 
 
 def test_dce_chain_dead():
@@ -165,21 +127,20 @@ def test_dce_chain_dead():
         FlatOp('Add', {'srcVar1': '$tmp_2', 'srcVar2': '$tmp_3'}, '$tmp_4'),
     ]
     out1 = FlatOp('Equals', {'srcVar1': '$tmp_4'}, 'out')
-    result = dead_code_elimination([*ops, out1])
-    # $tmp_3 used by tmp_4 (Sub kept); $tmp_1/$tmp_2 used chain; all 4 ops + Equals kept
-    assert len(result) == 5
+    prog = Program.from_flat([*ops, out1], {}).optimize(dce_only)
+    assert len(prog.ops) == 5
+
     out2 = FlatOp('Equals', {'srcVar1': '$tmp_2'}, 'out')
-    result2 = dead_code_elimination([*ops, out2])
-    # Only the chain leading to $tmp_2 kept; $tmp_3/$tmp_4 dead
-    assert len(result2) == 3
-    assert {op.result for op in result2} == {'$tmp_1', '$tmp_2', 'out'}
+    prog2 = Program.from_flat([*ops, out2], {}).optimize(dce_only)
+    assert len(prog2.ops) == 3
+    assert {op.result for op in prog2.ops} == {'$tmp_1', '$tmp_2', 'out'}
 
 
 def test_dce_empty_live():
-    """No live temps → all ops dead."""
+    """No live temps — all ops dead."""
     ops = [FlatOp('Add', {'srcVar1': '$1', 'srcVar2': '$2'}, '$tmp_1')]
-    result = dead_code_elimination(ops)
-    assert len(result) == 0
+    prog = Program.from_flat(ops, {}).optimize(dce_only)
+    assert len(prog.ops) == 0
 
 
 # ---- Temp reuse ------------------------------------------------------------
@@ -192,8 +153,8 @@ def test_reuse_independent():
         FlatOp('Add', {'srcVar1': '$3', 'srcVar2': '$4'}, '$tmp_2'),
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$tmp_2'}, '$tmp_3'),
     ]
-    result = temp_reuse(ops)
-    assert _max_temp(result) <= 3
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) <= 3
 
 
 def test_reuse_chain():
@@ -203,21 +164,17 @@ def test_reuse_chain():
         FlatOp('Mul', {'srcVar1': '$tmp_1', 'srcVar2': '$3'}, '$tmp_2'),
         FlatOp('Sub', {'srcVar1': '$tmp_2', 'srcVar2': '$4'}, '$tmp_3'),
     ]
-    result = temp_reuse(ops)
-    # tmp_1 and tmp_3 can share (non-overlapping), so max ≤ 2
-    assert _max_temp(result) <= 2
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) <= 2
 
 
 def test_reuse_semantics_preserved():
     """Temp reuse doesn't change computed results."""
-    expr = Add(Var('x'), Var('y'))
-    flattener = Flattener()
-    flattener.flatten(expr)
-    res = flattener.result()
-    original = emit_vmt(res.ops, res.consts)
-    reused = emit_vmt(temp_reuse(res.ops), res.consts)
+    prog = Program.from_tree(result=Add(Var('x'), Var('y')))
     ctx = EvalContext(vars={'$x': 3.0, '$y': 4.0})
-    assert interpret_vmt(original, ctx) == interpret_vmt(reused, ctx)
+    raw_state = interpret_vmt(prog.emit(), ctx)
+    reused_state = interpret_vmt(prog.optimize(reuse_only).emit(), ctx)
+    assert raw_state == reused_state
 
 
 def test_reuse_all_disjoint():
@@ -228,15 +185,12 @@ def test_reuse_all_disjoint():
         FlatOp('Add', {'srcVar1': '$e', 'srcVar2': '$f'}, '$tmp_3'),
         FlatOp('Add', {'srcVar1': '$g', 'srcVar2': '$h'}, '$tmp_4'),
     ]
-    result = temp_reuse(ops)
-    assert _max_temp(result) == 1
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) == 1
 
 
 def test_reuse_all_overlap():
     """Temps all overlap initially, but in-place reuse applies at the end."""
-    # Each op reads all previously written temps — intervals heavily overlap.
-    # tmp_4 reuses tmp_1's slot (tmp_1's last read is op 3, which defines tmp_4).
-    # tmp_5 reuses tmp_2's slot (tmp_2's last read is op 4, which defines tmp_5).
     ops = [
         FlatOp('Add', {'srcVar1': '$a', 'srcVar2': '$b'}, '$tmp_1'),
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$c'}, '$tmp_2'),
@@ -244,8 +198,8 @@ def test_reuse_all_overlap():
         FlatOp('Add', {'srcVar1': '$tmp_1', 'srcVar2': '$tmp_3'}, '$tmp_4'),
         FlatOp('Multiply', {'srcVar1': '$tmp_2', 'srcVar2': '$tmp_4'}, '$tmp_5'),
     ]
-    result = temp_reuse(ops)
-    assert _max_temp(result) < 4  # was 4 before in-place reuse
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) < 4
 
 
 @pytest.mark.parametrize('depth', [20, 50, 100])
@@ -256,29 +210,15 @@ def test_reuse_long_chain_correctness(depth: int) -> None:
     for i in range(1, depth + 1):
         ops.append(FlatOp('Add', {'srcVar1': prev, 'srcVar2': '$1'}, f'$tmp_{i}'))
         prev = f'$tmp_{i}'
-    result = temp_reuse(ops)
-    assert _max_temp(result) <= 2
-    consts = {1.0: '$1'}
-    vmt = emit_vmt(result, consts)
+    prog = Program.from_flat(ops, {1.0: '$1'}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) <= 2
     ctx = EvalContext(vars={'$input': 0.0})
-    state = interpret_vmt(vmt, ctx)
-    assert _last_result(state) == approx(float(depth))
+    state = interpret_vmt(prog.emit(), ctx)
+    assert last_temp_result(state) == approx(float(depth))
 
 
 def test_reuse_diamond_dag():
     """Diamond DAG: shared sub-expression has short liveness — recycled after."""
-    #     $a  $b       $c  $d
-    #       \ /          \ /
-    #       tmp_1       tmp_2       (Add pairs)
-    #        |            |
-    #       tmp_3 = Mul(tmp_1, tmp_2)   ← last use of tmp_1, tmp_2
-    #        |
-    #       tmp_4 = Sub(tmp_3, $e)      ← last use of tmp_3
-    #  $f --|
-    #        \
-    #        tmp_5 = Add($f, tmp_4)     ← last use of tmp_4
-    #        |
-    #       (output)
     ops = [
         FlatOp('Add', {'srcVar1': '$a', 'srcVar2': '$b'}, '$tmp_1'),
         FlatOp('Add', {'srcVar1': '$c', 'srcVar2': '$d'}, '$tmp_2'),
@@ -286,13 +226,8 @@ def test_reuse_diamond_dag():
         FlatOp('Subtract', {'srcVar1': '$tmp_3', 'srcVar2': '$e'}, '$tmp_4'),
         FlatOp('Add', {'srcVar1': '$f', 'srcVar2': '$tmp_4'}, '$tmp_5'),
     ]
-    result = temp_reuse(ops)
-    # Intervals: tmp_1=[0,2], tmp_2=[1,2], tmp_3=[2,3], tmp_4=[3,4], tmp_5=[4,4]
-    # Greedy needs at least 3 slots: tmp_1, tmp_2, tmp_3 all overlap.
-    # tmp_4 uses slot 1, tmp_5 uses slot 2.
-    assert _max_temp(result) <= 3
-    # Correctness check
-    vmt = emit_vmt(result, {})
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) <= 3
     ctx = EvalContext(
         vars={
             '$a': 1.0,
@@ -303,7 +238,7 @@ def test_reuse_diamond_dag():
             '$f': 6.0,
         }
     )
-    state = interpret_vmt(vmt, ctx)
+    state = interpret_vmt(prog.emit(), ctx)
     values = [v for v in state.values() if isinstance(v, (int, float))]
     assert any(abs(v - 22.0) < 1e-9 for v in values)
 
@@ -351,20 +286,15 @@ def test_reuse_pipeline_correctness_randomish():
 
 def test_reuse_flow_graph_with_fork():
     """Fork-join: a value used by two downstream ops — temp freed only after both."""
-    # tmp_1 used by both tmp_2 and tmp_3 → stays alive until both done
     ops = [
         FlatOp('Add', {'srcVar1': '$a', 'srcVar2': '$b'}, '$tmp_1'),
         FlatOp('Multiply', {'srcVar1': '$tmp_1', 'srcVar2': '$c'}, '$tmp_2'),
         FlatOp('Subtract', {'srcVar1': '$tmp_1', 'srcVar2': '$d'}, '$tmp_3'),
         FlatOp('Divide', {'srcVar1': '$tmp_2', 'srcVar2': '$tmp_3'}, '$tmp_4'),
     ]
-    result = temp_reuse(ops)
-    # Intervals: tmp_1=[0,2], tmp_2=[1,3], tmp_3=[2,3], tmp_4=[3,3]
-    # tmp_1 & tmp_2 overlap at [1,2]; tmp_2 & tmp_3 overlap at [2,3].
-    # Greedy: tmp_1→1, tmp_2→2, tmp_3→3 (overlaps both), tmp_4→1 (tmp_1 free).
-    assert _max_temp(result) <= 3
-    vmt = emit_vmt(result, {})
+    prog = Program.from_flat(ops, {}).optimize(reuse_only)
+    assert max_temp_index(prog.ops) <= 3
     ctx = EvalContext(vars={'$a': 10.0, '$b': 2.0, '$c': 3.0, '$d': 4.0})
-    state = interpret_vmt(vmt, ctx)
+    state = interpret_vmt(prog.emit(), ctx)
     values = [v for v in state.values() if isinstance(v, (int, float))]
     assert any(abs(v - 4.5) < 1e-9 for v in values)
