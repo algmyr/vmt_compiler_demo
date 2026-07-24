@@ -284,6 +284,7 @@ def peephole_optimize(
 
     # --- NOT pattern detection (operates on *cleaned* ops) ------------------
     not_map: dict[str, str] = {}
+    loe_map: dict[str, tuple[str, str, str, str]] = {}
     for op in cleaned:
         match op:
             case FlatOp(
@@ -296,6 +297,21 @@ def peephole_optimize(
                 _,
             ):
                 not_map[op.result] = op.params['srcVar1']
+        if op.proxy == 'LessOrEqual':
+            p = op.params
+            loe_map[op.result] = (
+                p['srcVar1'],
+                p['srcVar2'],
+                p['lessEqualVar'],
+                p['greaterVar'],
+            )
+
+    # --- Use counts for LessOrEqual results (negation absorption) -----------
+    loe_total_use: dict[str, int] = {}
+    for op in cleaned:
+        for v in op.params.values():
+            if v in loe_map:
+                loe_total_use[v] = loe_total_use.get(v, 0) + 1
 
     # --- Truthy fusion stages (operate on *cleaned* ops) --------------------
     truthy: dict[str, str] = {}
@@ -327,10 +343,41 @@ def peephole_optimize(
                 )
 
     result: list[FlatOp] = []
+    # Pre-identified negation-absorption pairs (NOT result → inner result to skip)
+    neg_absorb: dict[str, str] = {}
     for op in cleaned:
+        if op.result in not_map:
+            src = not_map[op.result]
+            loe = loe_map.get(src)
+            if (
+                loe is not None
+                and src not in not_map
+                and loe_total_use.get(src, 0) == 1
+            ):
+                neg_absorb[op.result] = src
+
+    skip_results: set[str] = set(neg_absorb.values())
+    for op in cleaned:
+        if op.result in skip_results:
+            continue
+
+        # --- Negation absorption: NOT(LessOrEqual(x, y, le, gr)) ------------
+        #                                          → LessOrEqual(x, y, gr, le)
+        neg_absorbed = False
+        if op.result in neg_absorb:
+            src = not_map[op.result]
+            loe = loe_map[src]
+            op.params = {
+                'srcVar1': loe[0],
+                'srcVar2': loe[1],
+                'lessEqualVar': loe[3],
+                'greaterVar': loe[2],
+            }
+            neg_absorbed = True
+
         # --- Double NOT elimination: NOT(NOT(x)) → _is_truthy(x) ------------
         transformed_to_truthy = False
-        if op.result in not_map:
+        if not neg_absorbed and op.result in not_map:
             src = not_map[op.result]
             if src in not_map:
                 ultimate = not_map[src]

@@ -230,6 +230,106 @@ def test_double_not_correctness():
         assert state['$result'] == approx(expected)
 
 
+def test_neg_absorb_basic():
+    """NOT(LessOrEqual(x, y, le, gr)) → LessOrEqual(x, y, gr, le)."""
+    ops = [
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$x',
+                'srcVar2': '$y',
+                'lessEqualVar': '$le',
+                'greaterVar': '$gr',
+            },
+            '$tmp_inner',
+        ),
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$tmp_inner',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_out',
+        ),
+    ]
+    out, _ = peephole_optimize(ops, {})
+    assert len(out) == 1
+    assert out[0].params['srcVar1'] == '$x'
+    assert out[0].params['srcVar2'] == '$y'
+    assert out[0].params['lessEqualVar'] == '$gr'
+    assert out[0].params['greaterVar'] == '$le'
+
+
+def test_neg_absorb_inner_has_other_consumer():
+    """Negation absorption skipped when inner result is used elsewhere."""
+    ops = [
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$x',
+                'srcVar2': '$y',
+                'lessEqualVar': '$le',
+                'greaterVar': '$gr',
+            },
+            '$tmp_inner',
+        ),
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$tmp_inner',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_out',
+        ),
+        FlatOp(
+            'Add',
+            {'srcVar1': '$tmp_inner', 'srcVar2': '$z'},
+            '$other',
+        ),
+    ]
+    out, _ = peephole_optimize(ops, {})
+    # Inner kept (has second consumer), NOT remains unchanged
+    assert len(out) == 3
+    assert any(
+        op
+        for op in out
+        if op.proxy == 'LessOrEqual'
+        and op.params.get('lessEqualVar') == '$le'
+        and op.params.get('greaterVar') == '$gr'
+    )
+    assert any(
+        op
+        for op in out
+        if op.proxy == 'LessOrEqual'
+        and op.params.get('lessEqualVar') == '$1.0'
+        and op.params.get('greaterVar') == '$0.0'
+    )
+
+
+def test_neg_absorb_correctness():
+    """NOT(LessOrEqual(x, y, fr, tr)) yields same result via full pipeline."""
+    x = Var('x')
+    y = Const(5.0)
+    loe = LessOrEqual(x, y, Const(10.0), Const(20.0))
+    not_loe = LessOrEqual(loe, Const(0), Const(1), Const(0))
+    prog = Program.from_tree(result=not_loe)
+    vmt = prog.compile(optimize=full_optimize)
+    for val in (-5.0, 0.0, 3.0, 10.0):
+        state = interpret_vmt(vmt, EvalContext(vars={'$x': val}))
+        # NOT(x <= 5): if x <= 5 then NOT(10) = 0 else NOT(20) = 0
+        # Actually: LessOrEqual(x, 5, 10, 20) → 10 if x <= 5 else 20
+        # NOT: LessOrEqual(result, 0, 1, 0) → 1 if result <= 0 else 0
+        # So: 1 if (10 if x <= 5 else 20) <= 0 else 0
+        # Since 10 > 0 and 20 > 0, result is always 0.
+        # After absorption: LessOrEqual(x, 5, 20, 10) → 20 if x <= 5 else 10
+        expected = 20.0 if val <= 5.0 else 10.0
+        assert state['$result'] == approx(expected)
+
+
 def test_peephole_fusion_simple():
     """LessOrEqual(cond, 0, 0, 1) + LessOrEqual(result, 0, fr, tr) fuse."""
     params_t = {
