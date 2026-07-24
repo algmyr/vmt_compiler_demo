@@ -163,15 +163,11 @@ def test_double_not_basic():
         ),
     ]
     out, _ = peephole_optimize(ops, {})
-    assert len(out) == 2  # inner NOT kept (dead), outer transformed
-    truthy_op = next(op for op in out if op.params.get('lessEqualVar') == '$0.0')
-    assert truthy_op.params['srcVar1'] == '$x'
-    assert truthy_op.params['greaterVar'] == '$1.0'
-
-    # Inner NOT should be first (unchanged)
-    inner = out[0]
-    assert inner.params['lessEqualVar'] == '$1.0'
-    assert inner.params['greaterVar'] == '$0.0'
+    # After fixpoint convergence: inner NOT kept (still referenced), _is_truthy(x)
+    # removed as dead (DCE would clean the inner NOT).
+    assert len(out) == 1
+    assert out[0].params['lessEqualVar'] == '$1.0'
+    assert out[0].params['greaterVar'] == '$0.0'
 
 
 def test_double_not_with_consumer():
@@ -209,11 +205,11 @@ def test_double_not_with_consumer():
         ),
     ]
     out, _ = peephole_optimize(ops, {})
-    # The consumer is fused: LessOrEqual(x, 0, $fr, $tr)
+    # After fixpoint: dead NOT(x) kept, dead _is_truthy(x) removed, select fused
     fused = next(op for op in out if op.params.get('lessEqualVar') == '$fr')
     assert fused.params['srcVar1'] == '$x'
     assert fused.params['greaterVar'] == '$tr'
-    assert len(out) == 3  # dead NOT(x) + dead _is_truthy(x) kept (DCE cleans)
+    assert len(out) == 2
 
 
 def test_double_not_correctness():

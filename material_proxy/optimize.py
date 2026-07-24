@@ -239,7 +239,19 @@ def _patch_params(
 def peephole_optimize(
     ops: list[FlatOp], consts: dict[float, str]
 ) -> tuple[list[FlatOp], dict[float, str]]:
-    """Peephole rewrites on FlatOps.
+    """Peephole rewrites on FlatOps, iterated to fixpoint."""
+    while True:
+        prev_repr = repr(ops)
+        ops, consts = _peephole_pass(ops, consts)
+        if repr(ops) == prev_repr:
+            break
+    return ops, consts
+
+
+def _peephole_pass(
+    ops: list[FlatOp], consts: dict[float, str]
+) -> tuple[list[FlatOp], dict[float, str]]:
+    """Single peephole pass (called by :func:`peephole_optimize`).
 
     ``_is_truthy`` fusion:
       ``LessOrEqual(cond, 0, 0, 1)`` followed by
