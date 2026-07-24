@@ -138,6 +138,98 @@ def test_identity_alias_full_pipeline_correctness():
     assert state['$result'] == approx(42.0)
 
 
+def test_double_not_basic():
+    """NOT(NOT(x)) is eliminated to _is_truthy(x) (inner NOT becomes dead)."""
+    ops = [
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$x',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_i',
+        ),
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$tmp_i',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_o',
+        ),
+    ]
+    out, _ = peephole_optimize(ops, {})
+    assert len(out) == 2  # inner NOT kept (dead), outer transformed
+    truthy_op = next(op for op in out if op.params.get('lessEqualVar') == '$0.0')
+    assert truthy_op.params['srcVar1'] == '$x'
+    assert truthy_op.params['greaterVar'] == '$1.0'
+
+    # Inner NOT should be first (unchanged)
+    inner = out[0]
+    assert inner.params['lessEqualVar'] == '$1.0'
+    assert inner.params['greaterVar'] == '$0.0'
+
+
+def test_double_not_with_consumer():
+    """Double-NOT result consumed by LessOrEqual select fuses further."""
+    ops = [
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$x',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_i',
+        ),
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$tmp_i',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$1.0',
+                'greaterVar': '$0.0',
+            },
+            '$tmp_o',
+        ),
+        FlatOp(
+            'LessOrEqual',
+            {
+                'srcVar1': '$tmp_o',
+                'srcVar2': '$0.0',
+                'lessEqualVar': '$fr',
+                'greaterVar': '$tr',
+            },
+            '$result',
+        ),
+    ]
+    out, _ = peephole_optimize(ops, {})
+    # The consumer is fused: LessOrEqual(x, 0, $fr, $tr)
+    fused = next(op for op in out if op.params.get('lessEqualVar') == '$fr')
+    assert fused.params['srcVar1'] == '$x'
+    assert fused.params['greaterVar'] == '$tr'
+    assert len(out) == 3  # dead NOT(x) + dead _is_truthy(x) kept (DCE cleans)
+
+
+def test_double_not_correctness():
+    """Double NOT yields same result as _is_truthy via full pipeline."""
+    x = Var('x')
+    not_x = LessOrEqual(x, Const(0), Const(1), Const(0))
+    not_not_x = LessOrEqual(not_x, Const(0), Const(1), Const(0))
+    prog = Program.from_tree(result=not_not_x)
+    vmt = prog.compile(optimize=full_optimize)
+    for val in (-5.0, 0.0, 3.0):
+        state = interpret_vmt(vmt, EvalContext(vars={'$x': val}))
+        # NOT(NOT(x)) should be 1 if x > 0, else 0
+        expected = 1.0 if val > 0 else 0.0
+        assert state['$result'] == approx(expected)
+
+
 def test_peephole_fusion_simple():
     """LessOrEqual(cond, 0, 0, 1) + LessOrEqual(result, 0, fr, tr) fuse."""
     params_t = {

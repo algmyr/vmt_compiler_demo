@@ -282,6 +282,21 @@ def peephole_optimize(
         if op.result not in identity_alias:
             cleaned.append(op)
 
+    # --- NOT pattern detection (operates on *cleaned* ops) ------------------
+    not_map: dict[str, str] = {}
+    for op in cleaned:
+        match op:
+            case FlatOp(
+                'LessOrEqual',
+                {
+                    'srcVar2': '$0.0',
+                    'lessEqualVar': '$1.0',
+                    'greaterVar': '$0.0',
+                },
+                _,
+            ):
+                not_map[op.result] = op.params['srcVar1']
+
     # --- Truthy fusion stages (operate on *cleaned* ops) --------------------
     truthy: dict[str, str] = {}
     for op in cleaned:
@@ -313,7 +328,23 @@ def peephole_optimize(
 
     result: list[FlatOp] = []
     for op in cleaned:
-        if op.result in truthy:
+        # --- Double NOT elimination: NOT(NOT(x)) → _is_truthy(x) ------------
+        transformed_to_truthy = False
+        if op.result in not_map:
+            src = not_map[op.result]
+            if src in not_map:
+                ultimate = not_map[src]
+                op.params = {
+                    'srcVar1': ultimate,
+                    'srcVar2': '$0.0',
+                    'lessEqualVar': '$0.0',
+                    'greaterVar': '$1.0',
+                }
+                truthy[op.result] = ultimate
+                transformed_to_truthy = True
+
+        # --- Truthy skip/rewrite stages ------------------------------------
+        if not transformed_to_truthy and op.result in truthy:
             remaining = total_use.get(op.result, 0) - rewire_use.get(op.result, 0)
             if remaining == 0:
                 continue
